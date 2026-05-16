@@ -5,18 +5,17 @@ import {
   TextInput,
   TouchableOpacity,
   StyleSheet,
-  Alert,
   KeyboardAvoidingView,
   Platform,
   ScrollView,
   Image,
   ActivityIndicator,
-  Modal,
   Animated,
   Dimensions,
   Vibration,
 } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
+import { SvgXml } from 'react-native-svg';
 import { useNavigation } from '@react-navigation/native';
 import { useAuth } from '../../contexts/AuthContext';
 import { supabase } from '../../../lib/supabase';
@@ -24,88 +23,206 @@ import * as Haptics from 'expo-haptics';
 
 const { width, height } = Dimensions.get('window');
 
+// Squiggly hand-drawn divider for the OR section
+const SquiggleDivider = () => {
+  const xml = `<svg viewBox="0 0 200 14" xmlns="http://www.w3.org/2000/svg" preserveAspectRatio="none">
+    <path d="M0 7 C12 2, 22 12, 34 7 C46 2, 56 12, 68 7 C80 2, 90 12, 102 7 C114 2, 124 12, 136 7 C148 2, 158 12, 170 7 C182 2, 192 12, 204 7"
+      fill="none" stroke="#D8C8BE" stroke-width="1.5" stroke-linecap="round"/>
+  </svg>`;
+  return <SvgXml xml={xml} width="100%" height={14} />;
+};
+
+// Hand-drawn curved underline beneath the greeting
+const HandUnderline = () => {
+  const xml = `<svg viewBox="0 0 150 9" xmlns="http://www.w3.org/2000/svg">
+    <path d="M2 6 C24 2, 58 8, 90 5 C122 2, 142 7, 152 5"
+      fill="none" stroke="#E2B8A8" stroke-width="2.8" stroke-linecap="round"/>
+  </svg>`;
+  return <SvgXml xml={xml} width={150} height={9} style={{ marginTop: 3, marginBottom: 13, marginLeft: 1 }} />;
+};
+
+// ─── SoftPressable — gentle scale + shadow on press ──────────────────────────
+const SoftPressable = ({ onPress, style, children, disabled }) => {
+  const scale = useRef(new Animated.Value(1)).current;
+
+  const pressIn = () =>
+    Animated.spring(scale, { toValue: 0.968, useNativeDriver: true, speed: 40, bounciness: 2 }).start();
+
+  const pressOut = () =>
+    Animated.spring(scale, { toValue: 1, useNativeDriver: true, speed: 28, bounciness: 5 }).start();
+
+  return (
+    <Animated.View style={[{ transform: [{ scale }] }, style]}>
+      <TouchableOpacity
+        onPress={onPress}
+        onPressIn={pressIn}
+        onPressOut={pressOut}
+        disabled={disabled}
+        activeOpacity={1}
+      >
+        {children}
+      </TouchableOpacity>
+    </Animated.View>
+  );
+};
+
+// ─── AlertBanner ──────────────────────────────────────────────────────────────
+const AlertBanner = ({ message, type = 'error', onDismiss }) => {
+  const slideAnim = useRef(new Animated.Value(-72)).current;
+  const opacityAnim = useRef(new Animated.Value(0)).current;
+
+  useEffect(() => {
+    if (message) {
+      Animated.parallel([
+        Animated.spring(slideAnim, { toValue: 0, tension: 68, friction: 12, useNativeDriver: true }),
+        Animated.timing(opacityAnim, { toValue: 1, duration: 240, useNativeDriver: true }),
+      ]).start();
+    } else {
+      Animated.parallel([
+        Animated.timing(slideAnim, { toValue: -72, duration: 210, useNativeDriver: true }),
+        Animated.timing(opacityAnim, { toValue: 0, duration: 200, useNativeDriver: true }),
+      ]).start();
+    }
+  }, [message]);
+
+  if (!message) return null;
+
+  const isSuccess = type === 'success';
+
+  return (
+    <Animated.View
+      style={[
+        styles.banner,
+        isSuccess ? styles.bannerSuccess : styles.bannerError,
+        { transform: [{ translateY: slideAnim }], opacity: opacityAnim },
+      ]}
+    >
+      <View style={[styles.bannerBadge, isSuccess && styles.bannerBadgeSuccess]}>
+        <Text style={styles.bannerBadgeText}>{isSuccess ? '✓' : '!'}</Text>
+      </View>
+      <Text style={[styles.bannerText, isSuccess && styles.bannerTextSuccess]} numberOfLines={2}>
+        {message}
+      </Text>
+      <TouchableOpacity
+        onPress={onDismiss}
+        hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
+      >
+        <Text style={[styles.bannerCloseText, isSuccess && styles.bannerTextSuccess]}>✕</Text>
+      </TouchableOpacity>
+    </Animated.View>
+  );
+};
+
+// ─── Main Login Screen ─────────────────────────────────────────────────────────
 export const LoginScreen = ({ setIsGuest }) => {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
-  const [resetLoading, setResetLoading] = useState(false);
   const [showPassword, setShowPassword] = useState(false);
   const [rememberMe, setRememberMe] = useState(false);
   const [emailValid, setEmailValid] = useState(false);
-  const [resetModalVisible, setResetModalVisible] = useState(false);
-  const [resetEmail, setResetEmail] = useState('');
-  const [resetSent, setResetSent] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
   const [loginSuccess, setLoginSuccess] = useState(false);
-  const [shakeAnim] = useState(new Animated.Value(0));
-  const [scaleAnim] = useState(new Animated.Value(1));
-  const [logoScale] = useState(new Animated.Value(0));
-  const [fadeAnim] = useState(new Animated.Value(0));
-  const [slideAnim] = useState(new Animated.Value(50));
-  
-  const { login, loading } = useAuth();
+  const [emailFocused, setEmailFocused] = useState(false);
+  const [passwordFocused, setPasswordFocused] = useState(false);
+
+  const [resetVisible, setResetVisible] = useState(false);
+  const [resetEmail, setResetEmail] = useState('');
+  const [resetLoading, setResetLoading] = useState(false);
+  const [resetSent, setResetSent] = useState(false);
+
+  const [alertMessage, setAlertMessage] = useState('');
+  const [alertType, setAlertType] = useState('error');
+
+  const shakeAnim   = useRef(new Animated.Value(0)).current;
+  const scaleAnim   = useRef(new Animated.Value(1)).current;
+  const logoSlide   = useRef(new Animated.Value(-28)).current;
+  const logoOpacity = useRef(new Animated.Value(0)).current;
+  const formSlide   = useRef(new Animated.Value(36)).current;
+  const formOpacity = useRef(new Animated.Value(0)).current;
+  const logoFloat   = useRef(new Animated.Value(0)).current;
+
+  const { login } = useAuth();
   const navigation = useNavigation();
 
-  // Animations on mount
+  const showAlert = (msg, t = 'error') => {
+    setAlertMessage(msg);
+    setAlertType(t);
+    if (t === 'error') setTimeout(() => setAlertMessage(''), 4200);
+  };
+  const dismissAlert = () => setAlertMessage('');
+
+  const showPlatformAlert = (message, type = 'error') => {
+    if (Platform.OS === 'web') {
+      alert(message);
+    } else {
+      showAlert(message, type);
+    }
+  };
+
   useEffect(() => {
-    Animated.parallel([
-      Animated.spring(logoScale, {
-        toValue: 1,
-        tension: 10,
-        friction: 2,
-        useNativeDriver: true,
-      }),
-      Animated.timing(fadeAnim, {
-        toValue: 1,
-        duration: 800,
-        useNativeDriver: true,
-      }),
-      Animated.spring(slideAnim, {
-        toValue: 0,
-        tension: 20,
-        friction: 7,
-        useNativeDriver: true,
-      }),
+    Animated.stagger(130, [
+      Animated.parallel([
+        Animated.spring(logoSlide,   { toValue: 0, tension: 55, friction: 10, useNativeDriver: true }),
+        Animated.timing(logoOpacity, { toValue: 1, duration: 520, useNativeDriver: true }),
+      ]),
+      Animated.parallel([
+        Animated.spring(formSlide,   { toValue: 0, tension: 55, friction: 10, useNativeDriver: true }),
+        Animated.timing(formOpacity, { toValue: 1, duration: 520, useNativeDriver: true }),
+      ]),
     ]).start();
+
+    const loop = Animated.loop(
+      Animated.sequence([
+        Animated.timing(logoFloat, { toValue: -5, duration: 2300, useNativeDriver: true }),
+        Animated.timing(logoFloat, { toValue: 0,  duration: 2300, useNativeDriver: true }),
+      ])
+    );
+    const t = setTimeout(() => loop.start(), 900);
+    return () => { clearTimeout(t); loop.stop(); };
   }, []);
 
-  // Shake animation for errors
   const shake = () => {
     Animated.sequence([
-      Animated.timing(shakeAnim, { toValue: 10, duration: 50, useNativeDriver: true }),
-      Animated.timing(shakeAnim, { toValue: -10, duration: 50, useNativeDriver: true }),
-      Animated.timing(shakeAnim, { toValue: 10, duration: 50, useNativeDriver: true }),
-      Animated.timing(shakeAnim, { toValue: 0, duration: 50, useNativeDriver: true }),
+      Animated.timing(shakeAnim, { toValue:  9, duration: 46, useNativeDriver: true }),
+      Animated.timing(shakeAnim, { toValue: -9, duration: 46, useNativeDriver: true }),
+      Animated.timing(shakeAnim, { toValue:  6, duration: 46, useNativeDriver: true }),
+      Animated.timing(shakeAnim, { toValue: -6, duration: 46, useNativeDriver: true }),
+      Animated.timing(shakeAnim, { toValue:  0, duration: 46, useNativeDriver: true }),
     ]).start();
-    Vibration.vibrate(100);
+    Vibration.vibrate(80);
     Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
   };
 
-  // Email validation
   const validateEmail = (text) => {
     setEmail(text);
-    const isValid = /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(text);
-    setEmailValid(isValid);
-    return isValid;
+    const ok = /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(text);
+    setEmailValid(ok);
+    return ok;
   };
 
   const handleLogin = async () => {
-    if (!email || !password) {
-      shake();
-      Alert.alert('Missing Fields', 'Please fill in all fields');
-      return;
+    dismissAlert();
+    if (!email.trim()) { 
+      shake(); 
+      showPlatformAlert('Please enter your email address.');
+      return; 
     }
-    
-    if (!emailValid) {
-      shake();
-      Alert.alert('Invalid Email', 'Please enter a valid email address');
-      return;
+    if (!emailValid) { 
+      shake(); 
+      showPlatformAlert('That email doesn\'t look right. Check and try again.');
+      return; 
+    }
+    if (!password) { 
+      shake(); 
+      showPlatformAlert('Please enter your password.');
+      return; 
     }
 
     Animated.sequence([
-      Animated.timing(scaleAnim, { toValue: 0.95, duration: 100, useNativeDriver: true }),
-      Animated.spring(scaleAnim, { toValue: 1, friction: 3, useNativeDriver: true }),
+      Animated.timing(scaleAnim, { toValue: 0.96, duration: 75, useNativeDriver: true }),
+      Animated.spring(scaleAnim, { toValue: 1, friction: 4, useNativeDriver: true }),
     ]).start();
-    
+
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
     setIsLoading(true);
 
@@ -114,28 +231,28 @@ export const LoginScreen = ({ setIsGuest }) => {
       if (result.success) {
         Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
         setLoginSuccess(true);
-        
-        setTimeout(() => {
-          setLoginSuccess(false);
-        }, 1500);
+        showPlatformAlert('Welcome back! Signing you in...', 'success');
+        setTimeout(() => setLoginSuccess(false), 2000);
       } else {
         shake();
-        Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
-        // Show specific alert for invalid credentials
-        Alert.alert(
-          'Login Failed',
-          'Invalid email or password. Please check your credentials and try again.',
-          [{ text: 'OK', style: 'cancel' }]
-        );
+        const raw = result.error?.toLowerCase() || '';
+        let msg = 'Login failed. Please try again.';
+        if (raw.includes('invalid login') || raw.includes('invalid credentials') || raw.includes('user not found'))
+          msg = 'Wrong email or password. Double-check and try again.';
+        else if (raw.includes('email not confirmed'))
+          msg = 'Please verify your email first. Check your inbox.';
+        else if (raw.includes('too many requests') || raw.includes('rate limit'))
+          msg = 'Too many attempts. Please wait a moment and try again.';
+        else if (raw.includes('network') || raw.includes('fetch'))
+          msg = 'No connection. Check your internet and try again.';
+        else if (result.error)
+          msg = result.error;
+        
+        showPlatformAlert(msg);
       }
-    } catch (error) {
+    } catch {
       shake();
-      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
-      Alert.alert(
-        'Login Failed', 
-        'Invalid email or password. Please check your credentials and try again.',
-        [{ text: 'OK', style: 'cancel' }]
-      );
+      showPlatformAlert('Something went wrong. Please try again.');
     } finally {
       setIsLoading(false);
     }
@@ -143,627 +260,629 @@ export const LoginScreen = ({ setIsGuest }) => {
 
   const handleGuestMode = () => {
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-    if (setIsGuest) {
-      setIsGuest(true);
-    }
+    if (setIsGuest) setIsGuest(true);
   };
 
   const handleForgotPassword = async () => {
-    if (!resetEmail) {
-      Alert.alert('Error', 'Please enter your email address');
-      return;
+    if (!resetEmail.trim()) { 
+      showPlatformAlert('Enter your email address first.');
+      return; 
     }
-    
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
     setResetLoading(true);
-    
     try {
       const { error } = await supabase.auth.resetPasswordForEmail(resetEmail, {
         redirectTo: 'palengkehub://reset-password',
       });
-
       if (error) throw error;
-      
       Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
       setResetSent(true);
-      setTimeout(() => {
-        setResetModalVisible(false);
-        setResetSent(false);
-        setResetEmail('');
-      }, 2000);
-    } catch (error) {
-      Alert.alert('Error', error.message);
+      setTimeout(() => { setResetVisible(false); setResetSent(false); setResetEmail(''); }, 2500);
+    } catch (err) {
+      showPlatformAlert(err.message || 'Could not send reset email. Try again.');
     } finally {
       setResetLoading(false);
     }
   };
 
+  const emailInputStyle = [
+    styles.inputRow,
+    emailFocused                          ? styles.inputFocused  : null,
+    email.length > 0 && !emailValid       ? styles.inputError    : null,
+    emailValid && email.length > 0        ? styles.inputValid    : null,
+  ];
+
+  const passwordInputStyle = [
+    styles.inputRow,
+    passwordFocused ? styles.inputFocused : null,
+    { transform: [{ translateX: shakeAnim }] },
+  ];
+
   return (
-    <KeyboardAvoidingView 
-      style={styles.container}
+    <KeyboardAvoidingView
+      style={styles.root}
       behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
     >
-      {/* Clean Background */}
-      <Animated.View style={[styles.background, { opacity: fadeAnim }]}>
-        <LinearGradient
-          colors={['#FFFFFF', '#FAFAFA', '#F5F5F5']}
-          start={{ x: 0, y: 0 }}
-          end={{ x: 0, y: 1 }}
-          style={styles.backgroundGradient}
-        />
-      </Animated.View>
+      {/* FULL SCREEN BACKGROUND IMAGE */}
+      <Image
+        source={require('../../../src/assets/Lipapublicmarket.jpg')}
+        style={styles.fullScreenBackground}
+        resizeMode="cover"
+      />
+      
+      {/* Dark overlay for better text readability */}
+      <View style={styles.overlay} />
 
-      <ScrollView 
-        contentContainerStyle={styles.scrollContainer}
+      {/* Floating alert banner */}
+      {Platform.OS !== 'web' && (
+        <AlertBanner message={alertMessage} type={alertType} onDismiss={dismissAlert} />
+      )}
+
+      <ScrollView
+        contentContainerStyle={styles.scroll}
         showsVerticalScrollIndicator={false}
         keyboardShouldPersistTaps="handled"
       >
-        {/* Logo Section with Animation */}
-        <Animated.View 
+        {/* ── Header with Logo and Text ── */}
+        <Animated.View
           style={[
-            styles.headerSection,
-            {
-              transform: [{ scale: logoScale }],
-              opacity: fadeAnim,
-            }
+            styles.header,
+            { opacity: logoOpacity, transform: [{ translateY: logoSlide }] },
           ]}
         >
-          <View style={styles.logoContainer}>
-            <Image 
+          <Animated.View style={{ transform: [{ translateY: logoFloat }] }}>
+            <Image
               source={require('../../../src/assets/palengkehublogo.jpg')}
-              style={styles.logoImage}
-              resizeMode="contain"
+              style={styles.logoImg}
+              resizeMode="cover"
             />
+          </Animated.View>
+
+          <Text style={styles.appName}>PalengkeHub</Text>
+
+          <View style={styles.tagRow}>
+            <View style={styles.tagDot} />
+            <Text style={styles.tagline}>Lipa City Public Market</Text>
+            <View style={styles.tagDot} />
           </View>
-          
-          <Text style={styles.title}>PalengkeHub</Text>
-          <Text style={styles.subtitle}>Lipa City Public Market</Text>
         </Animated.View>
 
-        {/* Form Section with Slide Animation */}
-        <Animated.View 
+        {/* ── Login Card (Floating on top of background) ── */}
+        <Animated.View
           style={[
-            styles.formSection,
-            {
-              transform: [{ translateY: slideAnim }],
-              opacity: fadeAnim,
-            }
+            styles.card,
+            { opacity: formOpacity, transform: [{ translateY: formSlide }] },
           ]}
         >
-          <Text style={styles.welcomeText}>Welcome Back!</Text>
-          <Text style={styles.signInText}>Sign in to your account</Text>
+          <Text style={styles.greeting}>Mabuhay! 👋</Text>
+          <HandUnderline />
+          <Text style={styles.sub}>Sign in to your account</Text>
 
-          {/* Email Input */}
-          <View style={styles.inputGroup}>
-            <Text style={styles.inputLabel}>Email</Text>
-            <Animated.View style={[styles.inputWrapper, emailValid && email.length > 0 && styles.inputValid]}>
-              <Text style={[styles.inputIcon, emailValid && email.length > 0 && styles.inputIconValid]}>📧</Text>
+          {/* Email */}
+          <View style={styles.fieldGroup}>
+            <Text style={styles.label}>Email Address</Text>
+            <View style={emailInputStyle}>
+              <Text style={styles.fieldIcon}>✉</Text>
               <TextInput
-                style={styles.input}
-                placeholder="Enter your email"
-                placeholderTextColor="#9CA3AF"
+                style={styles.textInput}
+                placeholder="you@example.com"
+                placeholderTextColor="#BEB0A4"
                 value={email}
                 onChangeText={validateEmail}
                 keyboardType="email-address"
                 autoCapitalize="none"
-                onFocus={() => Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light)}
+                autoCorrect={false}
+                onFocus={() => setEmailFocused(true)}
+                onBlur={() => setEmailFocused(false)}
               />
               {emailValid && email.length > 0 && (
-                <Text style={styles.checkIcon}>✓</Text>
+                <Text style={styles.validIcon}>✓</Text>
               )}
-            </Animated.View>
+            </View>
             {email.length > 0 && !emailValid && (
-              <Text style={styles.errorText}>Please enter a valid email</Text>
+              <Text style={styles.fieldError}>Enter a valid email (e.g. juan@email.com)</Text>
             )}
           </View>
 
-          {/* Password Input */}
-          <View style={styles.inputGroup}>
-            <Text style={styles.inputLabel}>Password</Text>
-            <Animated.View style={[styles.inputWrapper, { transform: [{ translateX: shakeAnim }] }]}>
-              <Text style={styles.inputIcon}>🔒</Text>
+          {/* Password */}
+          <View style={styles.fieldGroup}>
+            <Text style={styles.label}>Password</Text>
+            <Animated.View style={passwordInputStyle}>
+              <Text style={styles.fieldIcon}>🔑</Text>
               <TextInput
-                style={styles.input}
-                placeholder="Enter your password"
-                placeholderTextColor="#9CA3AF"
+                style={styles.textInput}
+                placeholder="Your password"
+                placeholderTextColor="#BEB0A4"
                 value={password}
                 onChangeText={setPassword}
                 secureTextEntry={!showPassword}
-                onFocus={() => Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light)}
+                onFocus={() => setPasswordFocused(true)}
+                onBlur={() => setPasswordFocused(false)}
               />
-              <TouchableOpacity 
+              <TouchableOpacity
                 onPress={() => {
                   setShowPassword(!showPassword);
                   Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
                 }}
-                style={styles.eyeButton}
+                hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
               >
-                <Text style={styles.eyeIcon}>
-                  {showPassword ? '👁️' : '👁️‍🗨️'}
-                </Text>
+                <Text style={styles.eyeToggle}>{showPassword ? 'Hide' : 'Show'}</Text>
               </TouchableOpacity>
             </Animated.View>
           </View>
 
-          {/* Remember Me & Forgot Password */}
+          {/* Options */}
           <View style={styles.optionsRow}>
-            <TouchableOpacity 
-              style={styles.rememberMe}
+            <TouchableOpacity
+              style={styles.rememberRow}
               onPress={() => {
                 setRememberMe(!rememberMe);
                 Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
               }}
+              activeOpacity={0.7}
             >
-              <View style={[styles.checkbox, rememberMe && styles.checkboxChecked]}>
-                {rememberMe && <Text style={styles.checkboxTick}>✓</Text>}
+              <View style={[styles.checkbox, rememberMe && styles.checkboxOn]}>
+                {rememberMe && <Text style={styles.checkmark}>✓</Text>}
               </View>
-              <Text style={styles.rememberMeText}>Remember me</Text>
+              <Text style={styles.rememberLabel}>Remember me</Text>
             </TouchableOpacity>
-            
-            <TouchableOpacity 
-              style={styles.forgotPassword}
-              onPress={() => {
-                setResetModalVisible(true);
-                Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-              }}
-            >
-              <Text style={styles.forgotPasswordText}>Forgot Password?</Text>
-            </TouchableOpacity>
+
+            <SoftPressable onPress={() => setResetVisible(true)}>
+              <Text style={styles.forgotLink}>Forgot password?</Text>
+            </SoftPressable>
           </View>
 
-          {/* Login Button */}
-          <Animated.View style={{ transform: [{ scale: scaleAnim }] }}>
-            <TouchableOpacity 
-              style={styles.loginButton}
+          {/* Sign In Button */}
+          <Animated.View style={[styles.signInBtn, { transform: [{ scale: scaleAnim }] }]}>
+            <TouchableOpacity
               onPress={handleLogin}
               disabled={isLoading || loginSuccess}
-              activeOpacity={0.85}
+              activeOpacity={0.88}
             >
               <LinearGradient
-                colors={loginSuccess ? ['#10B981', '#059669'] : ['#DC2626', '#B91C1C']}
+                colors={loginSuccess ? ['#2E8B57', '#3AA86B'] : ['#B5342A', '#D9503F']}
                 start={{ x: 0, y: 0 }}
                 end={{ x: 1, y: 0 }}
-                style={styles.loginGradient}
+                style={styles.signInGrad}
               >
-                {isLoading ? (
-                  <ActivityIndicator color="white" />
-                ) : loginSuccess ? (
-                  <Text style={styles.loginButtonText}>✓ Success!</Text>
-                ) : (
-                  <Text style={styles.loginButtonText}>Sign In</Text>
-                )}
+                {isLoading
+                  ? <ActivityIndicator color="#fff" />
+                  : loginSuccess
+                    ? <Text style={styles.signInText}>✓  Signed In</Text>
+                    : <Text style={styles.signInText}>Sign In</Text>
+                }
               </LinearGradient>
             </TouchableOpacity>
           </Animated.View>
 
-          {/* Divider */}
+          {/* OR Divider */}
           <View style={styles.divider}>
-            <View style={styles.dividerLine} />
-            <Text style={styles.dividerText}>or</Text>
-            <View style={styles.dividerLine} />
+            <View style={{ flex: 1 }}><SquiggleDivider /></View>
+            <Text style={styles.dividerLabel}>or</Text>
+            <View style={{ flex: 1 }}><SquiggleDivider /></View>
           </View>
 
-          {/* Guest Mode Button */}
-          <TouchableOpacity 
-            style={styles.guestButton}
-            onPress={handleGuestMode}
-            activeOpacity={0.7}
-          >
-            <Text style={styles.guestButtonIcon}>👋</Text>
+          {/* Guest Button */}
+          <SoftPressable onPress={handleGuestMode} style={styles.guestBtn}>
             <View>
-              <Text style={styles.guestButtonText}>Continue as Guest</Text>
-              <Text style={styles.guestButtonSubtext}>Browse without an account</Text>
+              <Text style={styles.guestTitle}>👀 Browse as Guest</Text>
+              <Text style={styles.guestSub}>No account needed</Text>
             </View>
-          </TouchableOpacity>
+          </SoftPressable>
 
-          {/* Sign Up Link */}
-          <View style={styles.signupContainer}>
-            <Text style={styles.signupText}>Don't have an account? </Text>
-            <TouchableOpacity 
+          {/* Sign up */}
+          <View style={styles.signupRow}>
+            <Text style={styles.signupPrompt}>Don't have an account? </Text>
+            <SoftPressable
               onPress={() => {
                 Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
                 navigation.navigate('SignUp');
               }}
             >
-              <Text style={styles.signupLink}>Sign Up</Text>
-            </TouchableOpacity>
+              <Text style={styles.signupLink}>Create one.</Text>
+            </SoftPressable>
           </View>
         </Animated.View>
       </ScrollView>
 
-      {/* Reset Password Modal */}
-      <Modal
-        visible={resetModalVisible}
-        transparent={true}
-        animationType="fade"
-        onRequestClose={() => setResetModalVisible(false)}
-      >
-        <View style={styles.modalOverlay}>
-          <View style={styles.modalContainer}>
-            <Text style={styles.modalTitle}>Reset Password</Text>
-            <Text style={styles.modalSubtitle}>
-              Enter your email address and we'll send you a link to reset your password.
+      {/* Forgot Password Sheet */}
+      {resetVisible && (
+        <View style={styles.sheetOverlay}>
+          <TouchableOpacity
+            style={StyleSheet.absoluteFill}
+            onPress={() => { setResetVisible(false); setResetSent(false); setResetEmail(''); }}
+            activeOpacity={1}
+          />
+          <View style={styles.sheet}>
+            <View style={styles.sheetHandle} />
+            <Text style={styles.sheetTitle}>Reset Password</Text>
+            <Text style={styles.sheetSub}>
+              We'll send a link so you can create a new password.
             </Text>
-            
-            <View style={styles.modalInputWrapper}>
-              <Text style={styles.modalInputIcon}>📧</Text>
-              <TextInput
-                style={styles.modalInput}
-                placeholder="Email Address"
-                placeholderTextColor="#9CA3AF"
-                value={resetEmail}
-                onChangeText={setResetEmail}
-                keyboardType="email-address"
-                autoCapitalize="none"
-              />
-            </View>
-            
-            <TouchableOpacity 
-              style={styles.modalButton}
-              onPress={handleForgotPassword}
-              disabled={resetLoading || resetSent}
+
+            {resetSent ? (
+              <View style={styles.sentBox}>
+                <Text style={styles.sentIcon}>📬</Text>
+                <Text style={styles.sentText}>Email sent! Check your inbox.</Text>
+              </View>
+            ) : (
+              <>
+                <View style={[styles.inputRow, { marginBottom: 22 }]}>
+                  <Text style={styles.fieldIcon}>✉</Text>
+                  <TextInput
+                    style={styles.textInput}
+                    placeholder="your@email.com"
+                    placeholderTextColor="#BEB0A4"
+                    value={resetEmail}
+                    onChangeText={setResetEmail}
+                    keyboardType="email-address"
+                    autoCapitalize="none"
+                  />
+                </View>
+
+                <TouchableOpacity
+                  style={styles.signInBtn}
+                  onPress={handleForgotPassword}
+                  disabled={resetLoading}
+                  activeOpacity={0.88}
+                >
+                  <LinearGradient
+                    colors={['#B5342A', '#D9503F']}
+                    start={{ x: 0, y: 0 }}
+                    end={{ x: 1, y: 0 }}
+                    style={styles.signInGrad}
+                  >
+                    {resetLoading
+                      ? <ActivityIndicator color="#fff" />
+                      : <Text style={styles.signInText}>Send Reset Link</Text>
+                    }
+                  </LinearGradient>
+                </TouchableOpacity>
+              </>
+            )}
+
+            <TouchableOpacity
+              style={styles.cancelBtn}
+              onPress={() => { setResetVisible(false); setResetSent(false); setResetEmail(''); }}
             >
-              <LinearGradient
-                colors={['#DC2626', '#EF4444']}
-                style={styles.modalButtonGradient}
-              >
-                {resetLoading ? (
-                  <ActivityIndicator color="white" />
-                ) : resetSent ? (
-                  <Text style={styles.modalButtonText}>✓ Email Sent!</Text>
-                ) : (
-                  <Text style={styles.modalButtonText}>Send Reset Link</Text>
-                )}
-              </LinearGradient>
-            </TouchableOpacity>
-            
-            <TouchableOpacity 
-              style={styles.modalCloseButton}
-              onPress={() => {
-                setResetModalVisible(false);
-                setResetEmail('');
-                setResetSent(false);
-              }}
-            >
-              <Text style={styles.modalCloseText}>Cancel</Text>
+              <Text style={styles.cancelText}>Cancel</Text>
             </TouchableOpacity>
           </View>
         </View>
-      </Modal>
+      )}
     </KeyboardAvoidingView>
   );
 };
 
+// ─── StyleSheet ───────────────────────────────────────────────────────────────
 const styles = StyleSheet.create({
-  container: {
+  root: {
     flex: 1,
-    backgroundColor: '#FFFFFF',
+    backgroundColor: 'transparent', // Transparent so image shows through
   },
-  background: {
+
+  // FULL SCREEN BACKGROUND
+  fullScreenBackground: {
     position: 'absolute',
     top: 0,
     left: 0,
     right: 0,
     bottom: 0,
+    width: '100%',
+    height: '100%',
   },
-  backgroundGradient: {
-    flex: 1,
+
+  // Dark overlay for better text contrast
+  overlay: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
+    backgroundColor: 'rgba(0, 0, 0, 0.45)', // Darkens background for better readability
   },
-  scrollContainer: {
-    flexGrow: 1,
-    paddingBottom: 30,
-  },
-  headerSection: {
-    alignItems: 'center',
-    paddingTop: 50,
-    paddingBottom: 40,
-  },
-  logoContainer: {
-    width: 100,
-    height: 100,
-    borderRadius: 20,
-    justifyContent: 'center',
-    alignItems: 'center',
-    marginBottom: 20,
-    backgroundColor: '#FFFFFF',
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.1,
-    shadowRadius: 12,
-    elevation: 8,
-    borderWidth: 1,
-    borderColor: '#F0F0F0',
-  },
-  logoImage: {
-    width: 80,
-    height: 80,
-    borderRadius: 16,
-  },
-  title: {
-    fontSize: 32,
-    fontWeight: '700',
-    color: '#DC2626',
-    marginBottom: 6,
-    letterSpacing: -0.5,
-  },
-  subtitle: {
-    fontSize: 14,
-    color: '#6B7280',
-    letterSpacing: 0.3,
-    fontWeight: '400',
-  },
-  formSection: {
-    backgroundColor: '#FFFFFF',
-    borderTopLeftRadius: 32,
-    borderTopRightRadius: 32,
-    paddingHorizontal: 28,
-    paddingTop: 40,
-    paddingBottom: 40,
-    marginTop: 20,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: -2 },
-    shadowOpacity: 0.05,
-    shadowRadius: 12,
-    elevation: 5,
-  },
-  welcomeText: {
-    fontSize: 26,
-    fontWeight: '600',
-    color: '#1F2937',
-    marginBottom: 6,
-  },
-  signInText: {
-    fontSize: 15,
-    color: '#6B7280',
-    marginBottom: 32,
-    fontWeight: '400',
-  },
-  inputGroup: {
-    marginBottom: 20,
-  },
-  inputLabel: {
-    fontSize: 14,
-    fontWeight: '500',
-    color: '#374151',
-    marginBottom: 8,
-    marginLeft: 4,
-  },
-  inputWrapper: {
+
+  // ── Alert Banner ─────────────────────────────────────────────────────────────
+  banner: {
+    position: 'absolute',
+    top: Platform.OS === 'ios' ? 52 : 14,
+    left: 14, right: 14,
+    zIndex: 999,
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: '#F9FAFB',
-    borderRadius: 12,
+    borderRadius: 20,
+    borderTopRightRadius: 10,
+    borderBottomRightRadius: 10,
+    paddingLeft: 12, paddingRight: 14,
+    paddingTop: 11, paddingBottom: 13,
+    gap: 10,
+    shadowColor: '#5C2D1A',
+    shadowOffset: { width: 0, height: 5 },
+    shadowOpacity: 0.10,
+    shadowRadius: 10,
+    elevation: 6,
+  },
+  bannerError: {
+    backgroundColor: '#FFF2EF',
     borderWidth: 1,
-    borderColor: '#E5E7EB',
-    paddingHorizontal: 16,
-    height: 52,
+    borderColor: '#F5C0B6',
+  },
+  bannerSuccess: {
+    backgroundColor: '#EDFAF3',
+    borderWidth: 1,
+    borderColor: '#A8EACC',
+  },
+  bannerBadge: {
+    width: 24, height: 24,
+    borderRadius: 10,
+    borderTopLeftRadius: 14,
+    borderBottomRightRadius: 14,
+    backgroundColor: '#D9503F',
+    justifyContent: 'center',
+    alignItems: 'center',
+    flexShrink: 0,
+  },
+  bannerBadgeSuccess: { backgroundColor: '#2E8B57' },
+  bannerBadgeText: { color: '#fff', fontSize: 11, fontWeight: '700' },
+  bannerText: { flex: 1, fontSize: 13.5, color: '#6E2518', fontWeight: '500', lineHeight: 18 },
+  bannerTextSuccess: { color: '#1A6640' },
+  bannerCloseText: { fontSize: 12, color: '#A84030', fontWeight: '600' },
+
+  // ── Scroll ────────────────────────────────────────────────────────────────────
+  scroll: { 
+    flexGrow: 1, 
+    paddingBottom: 44,
+    justifyContent: 'center',
+  },
+
+  // ── Header ───────────────────────────────────────────────────────────────────
+  header: {
+    alignItems: 'center',
+    paddingTop: Platform.OS === 'ios' ? 84 : 64,
+    paddingBottom: 18,
+    paddingLeft: 10,
+    position: 'relative',
+  },
+
+  logoImg: { 
+    width: 96, 
+    height: 96, 
+    borderRadius: 48,
+    marginBottom: 14,
+    borderWidth: 3,
+    borderColor: 'rgba(255,255,255,0.8)',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 8 },
+    shadowOpacity: 0.30,
+    shadowRadius: 16,
+    elevation: 8,
+  },
+
+  appName: {
+    fontSize: Math.min(26, width * 0.067),
+    fontWeight: '800',
+    color: '#FFFFFF', // White for better contrast on dark background
+    letterSpacing: 0.2,
+    marginBottom: 7,
+    textShadowColor: 'rgba(0,0,0,0.3)',
+    textShadowOffset: { width: 1, height: 1 },
+    textShadowRadius: 3,
+  },
+
+  tagRow: { flexDirection: 'row', alignItems: 'center', gap: 7 },
+  tagDot: {
+    width: 4, height: 4,
+    borderRadius: 2,
+    borderTopRightRadius: 3,
+    backgroundColor: '#FFFFFF',
+    opacity: 0.7,
+  },
+  tagline: {
+    fontSize: 11.5,
+    color: '#FFFFFF',
+    letterSpacing: 0.9,
+    textTransform: 'uppercase',
+    fontWeight: '500',
+    textShadowColor: 'rgba(0,0,0,0.3)',
+    textShadowOffset: { width: 1, height: 1 },
+    textShadowRadius: 2,
+  },
+
+  // ── Card (Now semi-transparent with blur effect) ─────────────────────────────
+  card: {
+    marginLeft: 20,
+    marginRight: 20,
+    backgroundColor: 'rgba(255, 250, 247, 0.92)', // Semi-transparent dirty white
+    borderTopLeftRadius: 28,
+    borderTopRightRadius: 36,
+    borderBottomLeftRadius: 36,
+    borderBottomRightRadius: 22,
+    paddingTop: 26,
+    paddingBottom: 32,
+    paddingLeft: 22,
+    paddingRight: 26,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 8 },
+    shadowOpacity: 0.25,
+    shadowRadius: 20,
+    elevation: 10,
+    backdropFilter: Platform.OS === 'web' ? 'blur(10px)' : undefined,
+  },
+
+  greeting: {
+    fontSize: Math.min(23, width * 0.059),
+    fontWeight: '700',
+    color: '#1E1008',
+  },
+  sub: {
+    fontSize: 13.5,
+    color: '#9E8070',
+    marginBottom: 22,
+    marginTop: 2,
+  },
+
+  // ── Fields ───────────────────────────────────────────────────────────────────
+  fieldGroup: { marginBottom: 16 },
+
+  label: {
+    fontSize: 11,
+    fontWeight: '600',
+    color: '#8A6558',
+    textTransform: 'uppercase',
+    letterSpacing: 0.8,
+    marginBottom: 9,
+    marginLeft: 2,
+  },
+
+  inputRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#F5EDE7',
+    borderRadius: 16,
+    borderTopRightRadius: 10,
+    borderBottomRightRadius: 10,
+    borderWidth: 1.5,
+    borderColor: '#E4D3C8',
+    paddingLeft: 16,
+    paddingRight: 12,
+    minHeight: 50,
+  },
+
+  inputFocused: {
+    borderColor: '#B5342A',
+    backgroundColor: '#FDF6F0',
+    shadowColor: '#B5342A',
+    shadowOffset: { width: 0, height: 0 },
+    shadowOpacity: 0.16,
+    shadowRadius: 6,
+    elevation: 2,
+  },
+  inputError: {
+    borderColor: '#D9503F',
+    backgroundColor: '#FFF3F1',
   },
   inputValid: {
-    borderColor: '#10B981',
-    backgroundColor: '#F0FDF4',
+    borderColor: '#4A9E72',
+    backgroundColor: '#F2FAF6',
   },
-  inputIcon: {
-    fontSize: 18,
-    marginRight: 12,
-  },
-  inputIconValid: {
-    color: '#10B981',
-  },
-  input: {
-    flex: 1,
-    fontSize: 15,
-    color: '#111827',
-  },
-  eyeButton: {
-    padding: 8,
-  },
-  eyeIcon: {
-    fontSize: 18,
-    color: '#9CA3AF',
-  },
-  checkIcon: {
-    fontSize: 16,
-    color: '#10B981',
-    fontWeight: 'bold',
-    marginLeft: 8,
-  },
-  errorText: {
-    fontSize: 12,
-    color: '#EF4444',
-    marginTop: 6,
-    marginLeft: 4,
-  },
+
+  fieldIcon:  { fontSize: 15, marginRight: 10, color: '#B5342A' },
+  textInput:  { flex: 1, fontSize: 14.5, color: '#1E1008', paddingVertical: 13 },
+  validIcon:  { fontSize: 15, color: '#4A9E72', fontWeight: '700', marginLeft: 6 },
+  eyeToggle:  { fontSize: 12.5, color: '#B5342A', fontWeight: '600', paddingLeft: 8 },
+  fieldError: { fontSize: 11.5, color: '#C0392B', marginTop: 5, marginLeft: 3 },
+
+  // ── Options Row ──────────────────────────────────────────────────────────────
   optionsRow: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
-    marginBottom: 32,
+    marginBottom: 20,
     marginTop: 4,
   },
-  rememberMe: {
-    flexDirection: 'row',
-    alignItems: 'center',
-  },
+  rememberRow: { flexDirection: 'row', alignItems: 'center', gap: 8 },
+
   checkbox: {
-    width: 20,
-    height: 20,
-    borderRadius: 5,
-    borderWidth: 2,
-    borderColor: '#D1D5DB',
-    marginRight: 8,
+    width: 20, height: 20,
+    borderRadius: 7,
+    borderTopLeftRadius: 10,
+    borderBottomRightRadius: 10,
+    borderWidth: 1.5,
+    borderColor: '#B5342A',
     justifyContent: 'center',
     alignItems: 'center',
   },
-  checkboxChecked: {
-    backgroundColor: '#DC2626',
-    borderColor: '#DC2626',
-  },
-  checkboxTick: {
-    color: 'white',
-    fontSize: 12,
-    fontWeight: 'bold',
-  },
-  rememberMeText: {
-    fontSize: 14,
-    color: '#6B7280',
-  },
-  forgotPasswordText: {
-    fontSize: 14,
-    color: '#DC2626',
-    fontWeight: '500',
-  },
-  loginButton: {
-    marginBottom: 24,
-    borderRadius: 12,
+  checkboxOn: { backgroundColor: '#B5342A' },
+  checkmark:  { color: '#fff', fontSize: 11, fontWeight: '700' },
+  rememberLabel: { fontSize: 13, color: '#b53535' },
+  forgotLink:    { fontSize: 13, color: '#B5342A', fontWeight: '600' },
+
+  // ── Sign In Button ────────────────────────────────────────────────────────────
+  signInBtn: {
+    borderRadius: 18,
+    borderTopRightRadius: 11,
+    borderBottomLeftRadius: 11,
     overflow: 'hidden',
-    shadowColor: '#DC2626',
-    shadowOffset: { width: 0, height: 3 },
-    shadowOpacity: 0.2,
-    shadowRadius: 6,
-    elevation: 3,
+    marginBottom: 18,
+    shadowColor: '#B5342A',
+    shadowOffset: { width: 0, height: 5 },
+    shadowOpacity: 0.24,
+    shadowRadius: 12,
+    elevation: 4,
   },
-  loginGradient: {
-    paddingVertical: 16,
+  signInGrad: {
+    paddingTop: 16,
+    paddingBottom: 14,
     alignItems: 'center',
-    justifyContent: 'center',
-    height: 52,
   },
-  loginButtonText: {
-    color: 'white',
-    fontSize: 16,
-    fontWeight: '600',
-    letterSpacing: 0.3,
-  },
+  signInText: { color: '#fff', fontSize: 15.5, fontWeight: '700', letterSpacing: 0.25 },
+
+  // ── Squiggle OR Divider ───────────────────────────────────────────────────────
   divider: {
     flexDirection: 'row',
     alignItems: 'center',
-    marginBottom: 24,
+    marginBottom: 18,
+    gap: 8,
   },
-  dividerLine: {
-    flex: 1,
-    height: 1,
-    backgroundColor: '#E5E7EB',
-  },
-  dividerText: {
-    marginHorizontal: 16,
-    color: '#9CA3AF',
-    fontSize: 13,
-    fontWeight: '400',
-  },
-  guestButton: {
+  dividerLabel: { fontSize: 12, color: '#BEB0A4', fontWeight: '500', paddingHorizontal: 2 },
+
+  // ── Guest Button ──────────────────────────────────────────────────────────────
+  guestBtn: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
-    gap: 12,
+    gap: 13,
     borderWidth: 1.5,
-    borderColor: '#E5E7EB',
-    borderRadius: 12,
-    paddingVertical: 14,
-    marginBottom: 24,
-    backgroundColor: 'white',
+    borderColor: '#E4D3C8',
+    borderRadius: 18,
+    borderTopRightRadius: 10,
+    borderBottomRightRadius: 10,
+    paddingTop: 13,
+    paddingBottom: 15,
+    paddingLeft: 18,
+    paddingRight: 14,
+    backgroundColor: '#F5EDE7',
+    marginBottom: 22,
+    alignSelf: 'center',
+    width: '80%',
   },
-  guestButtonIcon: {
-    fontSize: 22,
+  guestTitle: { fontSize: 14.5, fontWeight: '600', color: '#2A1610', textAlign: 'center' },
+  guestSub:   { fontSize: 11.5, color: '#9E8070', marginTop: 2, textAlign: 'center' },
+
+  // ── Sign Up ───────────────────────────────────────────────────────────────────
+  signupRow:    { flexDirection: 'row', justifyContent: 'center', alignItems: 'center' },
+  signupPrompt: { fontSize: 13.5, color: '#9E8070' },
+  signupLink:   { fontSize: 13.5, color: '#B5342A', fontWeight: '700' },
+
+  // ── Bottom Sheet ──────────────────────────────────────────────────────────────
+  sheetOverlay: {
+    ...StyleSheet.absoluteFillObject,
+    backgroundColor: 'rgba(0,0,0,0.6)',
+    justifyContent: 'flex-end',
+    zIndex: 100,
   },
-  guestButtonText: {
-    color: '#374151',
-    fontSize: 15,
-    fontWeight: '500',
+  sheet: {
+    backgroundColor: '#FAF7F2',
+    borderTopLeftRadius: 34,
+    borderTopRightRadius: 22,
+    paddingHorizontal: 24,
+    paddingTop: 14,
+    paddingBottom: Platform.OS === 'ios' ? 46 : 28,
   },
-  guestButtonSubtext: {
-    color: '#9CA3AF',
-    fontSize: 12,
-    marginTop: 2,
+  sheetHandle: {
+    width: 38, height: 4,
+    borderRadius: 2,
+    backgroundColor: '#E4D3C8',
+    alignSelf: 'center',
+    marginBottom: 22,
   },
-  signupContainer: {
-    flexDirection: 'row',
-    justifyContent: 'center',
-    alignItems: 'center',
-    paddingTop: 8,
-  },
-  signupText: {
-    fontSize: 14,
-    color: '#6B7280',
-  },
-  signupLink: {
-    fontSize: 14,
-    color: '#DC2626',
-    fontWeight: '600',
-  },
-  modalOverlay: {
-    flex: 1,
-    backgroundColor: 'rgba(0,0,0,0.5)',
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-  modalContainer: {
-    width: width - 48,
-    backgroundColor: 'white',
-    borderRadius: 20,
-    padding: 24,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.1,
-    shadowRadius: 12,
-    elevation: 8,
-  },
-  modalTitle: {
-    fontSize: 22,
-    fontWeight: '600',
-    color: '#111827',
-    marginBottom: 8,
-    textAlign: 'center',
-  },
-  modalSubtitle: {
-    fontSize: 14,
-    color: '#6B7280',
-    textAlign: 'center',
-    marginBottom: 24,
-    lineHeight: 20,
-  },
-  modalInputWrapper: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    backgroundColor: '#F9FAFB',
-    borderRadius: 12,
-    borderWidth: 1,
-    borderColor: '#E5E7EB',
-    paddingHorizontal: 16,
-    marginBottom: 20,
-    height: 52,
-  },
-  modalInputIcon: {
-    fontSize: 18,
-    marginRight: 12,
-  },
-  modalInput: {
-    flex: 1,
-    fontSize: 15,
-    color: '#111827',
-  },
-  modalButton: {
-    borderRadius: 12,
-    overflow: 'hidden',
-    marginBottom: 12,
-  },
-  modalButtonGradient: {
-    paddingVertical: 14,
-    alignItems: 'center',
-    height: 52,
-    justifyContent: 'center',
-  },
-  modalButtonText: {
-    color: 'white',
-    fontSize: 15,
-    fontWeight: '600',
-  },
-  modalCloseButton: {
-    paddingVertical: 12,
-    alignItems: 'center',
-  },
-  modalCloseText: {
-    color: '#6B7280',
-    fontSize: 14,
-    fontWeight: '500',
-  },
+  sheetTitle: { fontSize: 21, fontWeight: '700', color: '#1E1008', marginBottom: 7 },
+  sheetSub:   { fontSize: 13.5, color: '#8A6558', marginBottom: 22, lineHeight: 19 },
+
+  sentBox: { alignItems: 'center', paddingTop: 20, paddingBottom: 24, gap: 11 },
+  sentIcon: { fontSize: 38 },
+  sentText: { fontSize: 15.5, color: '#2E8B57', fontWeight: '600', textAlign: 'center' },
+
+  cancelBtn:  { paddingTop: 16, paddingBottom: 12, alignItems: 'center' },
+  cancelText: { fontSize: 13.5, color: '#9E8070', fontWeight: '500' },
 });
