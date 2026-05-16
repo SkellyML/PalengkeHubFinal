@@ -91,13 +91,13 @@ export const LoginScreen = ({ setIsGuest }) => {
   const handleLogin = async () => {
     if (!email || !password) {
       shake();
-      Alert.alert('Error', 'Please fill in all fields');
+      Alert.alert('Missing Fields', 'Please fill in all fields');
       return;
     }
     
     if (!emailValid) {
       shake();
-      Alert.alert('Error', 'Please enter a valid email address');
+      Alert.alert('Invalid Email', 'Please enter a valid email address');
       return;
     }
 
@@ -121,11 +121,21 @@ export const LoginScreen = ({ setIsGuest }) => {
       } else {
         shake();
         Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
-        Alert.alert('Login Failed', result.error);
+        // Show specific alert for invalid credentials
+        Alert.alert(
+          'Login Failed',
+          'Invalid email or password. Please check your credentials and try again.',
+          [{ text: 'OK', style: 'cancel' }]
+        );
       }
     } catch (error) {
       shake();
-      Alert.alert('Error', 'Something went wrong. Please try again.');
+      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
+      Alert.alert(
+        'Login Failed', 
+        'Invalid email or password. Please check your credentials and try again.',
+        [{ text: 'OK', style: 'cancel' }]
+      );
     } finally {
       setIsLoading(false);
     }
@@ -173,12 +183,12 @@ export const LoginScreen = ({ setIsGuest }) => {
       style={styles.container}
       behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
     >
-      {/* Animated Gradient Background */}
+      {/* Clean Background */}
       <Animated.View style={[styles.background, { opacity: fadeAnim }]}>
         <LinearGradient
-          colors={['#FFF5F5', '#FFFFFF', '#FFF0F0']}
+          colors={['#FFFFFF', '#FAFAFA', '#F5F5F5']}
           start={{ x: 0, y: 0 }}
-          end={{ x: 1, y: 1 }}
+          end={{ x: 0, y: 1 }}
           style={styles.backgroundGradient}
         />
       </Animated.View>
@@ -198,18 +208,13 @@ export const LoginScreen = ({ setIsGuest }) => {
             }
           ]}
         >
-          <LinearGradient
-            colors={['#DC2626', '#EF4444', '#F87171']}
-            start={{ x: 0, y: 0 }}
-            end={{ x: 1, y: 1 }}
-            style={styles.logoContainer}
-          >
+          <View style={styles.logoContainer}>
             <Image 
               source={require('../../../src/assets/palengkehublogo.jpg')}
               style={styles.logoImage}
               resizeMode="contain"
             />
-          </LinearGradient>
+          </View>
           
           <Text style={styles.title}>PalengkeHub</Text>
           <Text style={styles.subtitle}>Lipa City Public Market</Text>
@@ -230,11 +235,12 @@ export const LoginScreen = ({ setIsGuest }) => {
 
           {/* Email Input */}
           <View style={styles.inputGroup}>
+            <Text style={styles.inputLabel}>Email</Text>
             <Animated.View style={[styles.inputWrapper, emailValid && email.length > 0 && styles.inputValid]}>
               <Text style={[styles.inputIcon, emailValid && email.length > 0 && styles.inputIconValid]}>📧</Text>
               <TextInput
                 style={styles.input}
-                placeholder="Email Address"
+                placeholder="Enter your email"
                 placeholderTextColor="#9CA3AF"
                 value={email}
                 onChangeText={validateEmail}
@@ -251,13 +257,14 @@ export const LoginScreen = ({ setIsGuest }) => {
             )}
           </View>
 
-          {/* Password Input - WITHOUT strength indicator */}
+          {/* Password Input */}
           <View style={styles.inputGroup}>
+            <Text style={styles.inputLabel}>Password</Text>
             <Animated.View style={[styles.inputWrapper, { transform: [{ translateX: shakeAnim }] }]}>
               <Text style={styles.inputIcon}>🔒</Text>
               <TextInput
                 style={styles.input}
-                placeholder="Password"
+                placeholder="Enter your password"
                 placeholderTextColor="#9CA3AF"
                 value={password}
                 onChangeText={setPassword}
@@ -310,10 +317,10 @@ export const LoginScreen = ({ setIsGuest }) => {
               style={styles.loginButton}
               onPress={handleLogin}
               disabled={isLoading || loginSuccess}
-              activeOpacity={0.8}
+              activeOpacity={0.85}
             >
               <LinearGradient
-                colors={loginSuccess ? ['#10B981', '#059669'] : ['#DC2626', '#EF4444', '#F87171']}
+                colors={loginSuccess ? ['#10B981', '#059669'] : ['#DC2626', '#B91C1C']}
                 start={{ x: 0, y: 0 }}
                 end={{ x: 1, y: 0 }}
                 style={styles.loginGradient}
@@ -448,74 +455,88 @@ const styles = StyleSheet.create({
   },
   headerSection: {
     alignItems: 'center',
-    paddingTop: 60,
-    paddingBottom: 30,
+    paddingTop: 50,
+    paddingBottom: 40,
   },
   logoContainer: {
-    width: 110,
-    height: 110,
-    borderRadius: 55,
+    width: 100,
+    height: 100,
+    borderRadius: 20,
     justifyContent: 'center',
     alignItems: 'center',
     marginBottom: 20,
-    shadowColor: '#DC2626',
-    shadowOffset: { width: 0, height: 8 },
-    shadowOpacity: 0.25,
+    backgroundColor: '#FFFFFF',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.1,
     shadowRadius: 12,
     elevation: 8,
+    borderWidth: 1,
+    borderColor: '#F0F0F0',
   },
   logoImage: {
     width: 80,
     height: 80,
-    borderRadius: 40,
+    borderRadius: 16,
   },
   title: {
-    fontSize: 28,
-    fontWeight: 'bold',
+    fontSize: 32,
+    fontWeight: '700',
     color: '#DC2626',
-    marginBottom: 8,
+    marginBottom: 6,
+    letterSpacing: -0.5,
   },
   subtitle: {
     fontSize: 14,
     color: '#6B7280',
-    letterSpacing: 0.5,
+    letterSpacing: 0.3,
+    fontWeight: '400',
   },
   formSection: {
-    backgroundColor: 'rgba(255,255,255,0.95)',
-    borderTopLeftRadius: 30,
-    borderTopRightRadius: 30,
-    paddingHorizontal: 24,
-    paddingTop: 32,
+    backgroundColor: '#FFFFFF',
+    borderTopLeftRadius: 32,
+    borderTopRightRadius: 32,
+    paddingHorizontal: 28,
+    paddingTop: 40,
     paddingBottom: 40,
-    marginTop: 10,
+    marginTop: 20,
     shadowColor: '#000',
-    shadowOffset: { width: 0, height: -4 },
+    shadowOffset: { width: 0, height: -2 },
     shadowOpacity: 0.05,
-    shadowRadius: 8,
+    shadowRadius: 12,
     elevation: 5,
   },
   welcomeText: {
-    fontSize: 28,
-    fontWeight: '700',
-    color: '#111827',
-    marginBottom: 8,
+    fontSize: 26,
+    fontWeight: '600',
+    color: '#1F2937',
+    marginBottom: 6,
   },
   signInText: {
     fontSize: 15,
     color: '#6B7280',
     marginBottom: 32,
+    fontWeight: '400',
   },
   inputGroup: {
     marginBottom: 20,
+  },
+  inputLabel: {
+    fontSize: 14,
+    fontWeight: '500',
+    color: '#374151',
+    marginBottom: 8,
+    marginLeft: 4,
   },
   inputWrapper: {
     flexDirection: 'row',
     alignItems: 'center',
     backgroundColor: '#F9FAFB',
-    borderRadius: 16,
-    borderWidth: 1.5,
+    borderRadius: 12,
+    borderWidth: 1,
     borderColor: '#E5E7EB',
     paddingHorizontal: 16,
+    height: 52,
   },
   inputValid: {
     borderColor: '#10B981',
@@ -530,8 +551,7 @@ const styles = StyleSheet.create({
   },
   input: {
     flex: 1,
-    paddingVertical: 16,
-    fontSize: 16,
+    fontSize: 15,
     color: '#111827',
   },
   eyeButton: {
@@ -557,7 +577,8 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
-    marginBottom: 28,
+    marginBottom: 32,
+    marginTop: 4,
   },
   rememberMe: {
     flexDirection: 'row',
@@ -566,15 +587,16 @@ const styles = StyleSheet.create({
   checkbox: {
     width: 20,
     height: 20,
-    borderRadius: 4,
+    borderRadius: 5,
     borderWidth: 2,
-    borderColor: '#DC2626',
+    borderColor: '#D1D5DB',
     marginRight: 8,
     justifyContent: 'center',
     alignItems: 'center',
   },
   checkboxChecked: {
     backgroundColor: '#DC2626',
+    borderColor: '#DC2626',
   },
   checkboxTick: {
     color: 'white',
@@ -587,27 +609,30 @@ const styles = StyleSheet.create({
   },
   forgotPasswordText: {
     fontSize: 14,
-    color: '#EF4444',
+    color: '#DC2626',
     fontWeight: '500',
   },
   loginButton: {
     marginBottom: 24,
-    borderRadius: 16,
+    borderRadius: 12,
     overflow: 'hidden',
     shadowColor: '#DC2626',
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.3,
-    shadowRadius: 8,
-    elevation: 4,
+    shadowOffset: { width: 0, height: 3 },
+    shadowOpacity: 0.2,
+    shadowRadius: 6,
+    elevation: 3,
   },
   loginGradient: {
     paddingVertical: 16,
     alignItems: 'center',
+    justifyContent: 'center',
+    height: 52,
   },
   loginButtonText: {
     color: 'white',
     fontSize: 16,
-    fontWeight: '700',
+    fontWeight: '600',
+    letterSpacing: 0.3,
   },
   divider: {
     flexDirection: 'row',
@@ -623,6 +648,7 @@ const styles = StyleSheet.create({
     marginHorizontal: 16,
     color: '#9CA3AF',
     fontSize: 13,
+    fontWeight: '400',
   },
   guestButton: {
     flexDirection: 'row',
@@ -630,19 +656,19 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     gap: 12,
     borderWidth: 1.5,
-    borderColor: '#EF4444',
-    borderRadius: 16,
+    borderColor: '#E5E7EB',
+    borderRadius: 12,
     paddingVertical: 14,
     marginBottom: 24,
     backgroundColor: 'white',
   },
   guestButtonIcon: {
-    fontSize: 24,
+    fontSize: 22,
   },
   guestButtonText: {
-    color: '#EF4444',
-    fontSize: 16,
-    fontWeight: '600',
+    color: '#374151',
+    fontSize: 15,
+    fontWeight: '500',
   },
   guestButtonSubtext: {
     color: '#9CA3AF',
@@ -661,7 +687,7 @@ const styles = StyleSheet.create({
   },
   signupLink: {
     fontSize: 14,
-    color: '#EF4444',
+    color: '#DC2626',
     fontWeight: '600',
   },
   modalOverlay: {
@@ -673,7 +699,7 @@ const styles = StyleSheet.create({
   modalContainer: {
     width: width - 48,
     backgroundColor: 'white',
-    borderRadius: 24,
+    borderRadius: 20,
     padding: 24,
     shadowColor: '#000',
     shadowOffset: { width: 0, height: 4 },
@@ -682,8 +708,8 @@ const styles = StyleSheet.create({
     elevation: 8,
   },
   modalTitle: {
-    fontSize: 24,
-    fontWeight: 'bold',
+    fontSize: 22,
+    fontWeight: '600',
     color: '#111827',
     marginBottom: 8,
     textAlign: 'center',
@@ -704,6 +730,7 @@ const styles = StyleSheet.create({
     borderColor: '#E5E7EB',
     paddingHorizontal: 16,
     marginBottom: 20,
+    height: 52,
   },
   modalInputIcon: {
     fontSize: 18,
@@ -711,8 +738,7 @@ const styles = StyleSheet.create({
   },
   modalInput: {
     flex: 1,
-    paddingVertical: 14,
-    fontSize: 16,
+    fontSize: 15,
     color: '#111827',
   },
   modalButton: {
@@ -723,10 +749,12 @@ const styles = StyleSheet.create({
   modalButtonGradient: {
     paddingVertical: 14,
     alignItems: 'center',
+    height: 52,
+    justifyContent: 'center',
   },
   modalButtonText: {
     color: 'white',
-    fontSize: 16,
+    fontSize: 15,
     fontWeight: '600',
   },
   modalCloseButton: {
