@@ -487,7 +487,8 @@ export const LoginScreen = ({ setIsGuest }) => {
             <Text style={styles.label}>Password</Text>
             <Animated.View
               style={[
-                ...passwordInputStyle,
+                styles.inputRow,
+                passwordFocused ? styles.inputFocused : null,
                 { transform: [{ translateX: shakeAnim }] },
               ]}
             >
