@@ -3,19 +3,18 @@ import {
   View,
   Text,
   StyleSheet,
-  ScrollView,
   TouchableOpacity,
   StatusBar,
   Dimensions,
   SafeAreaView,
 } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
-import { BlurView } from 'expo-blur';
-import { NavigationContainer, useNavigation, useRoute } from '@react-navigation/native';
+import { NavigationContainer, useNavigation } from '@react-navigation/native';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 import { supabase } from './lib/supabase';
 import { AuthProvider, useAuth } from './src/contexts/AuthContext';
+import { CartProvider } from './src/contexts/CartContext';
 import { Header } from './src/components/Header'; 
 import { LoadingSpinner } from './src/components/LoadingSpinner';
 import { LoginScreen } from './src/screens/auth/LoginScreen';
@@ -369,7 +368,9 @@ export default function App() {
     <ErrorBoundary>
       <SafeAreaProvider>
         <AuthProvider>
-          <RootNavigator />
+          <CartProvider>
+            <RootNavigator />
+          </CartProvider>
         </AuthProvider>
       </SafeAreaProvider>
     </ErrorBoundary>
